@@ -29,7 +29,7 @@
  */
 
 static String version()   { "1.2.0" }
-static String timeStamp() { "2026/06/06 11:18" }
+static String timeStamp() { "2026/06/06 2:05" }
 
 import hubitat.device.Protocol
 import groovy.transform.Field
@@ -623,6 +623,7 @@ void parseZDOcommand(Map descMap) {
         case "0002": // Node Descriptor Request (Node_Desc_req)
             logDebug "ZDO Node Descriptor request, data=${descMap.data} (Sequence Number:${descMap.data[0]})"
             runIn(1, "sendTimeSync")  
+            runIn(2, "aqaraBlackMagic")
             break
         case "0013":
             logInfo "Device announcement received"
@@ -881,8 +882,7 @@ void configure() {
     if (logEnable) runIn(1800, "logsOff", [overwrite: true, misfire: "ignore"])  //Enable the debug logging for 30 minutes (i.e. 1800 seconds)
     initializeVars(false)
     runIn(DEFAULT_POLLING_INTERVAL, "deviceHealthCheck", [overwrite: true, misfire: "ignore"])
-    runIn(5, "fp300BlackMagic")
-    runIn(10, "sendTimeSync")
+    runIn(1, "sendTimeSync", [overwrite: true])
     runIn(15, "updated")
     logWarn "configure() - If no further logs appear, make sure you have woken the FP300 by pressing the button on it."
 }
@@ -976,22 +976,18 @@ void sendHealthStatusEvent(String value) {
 
 void fp300BlackMagic() {
     List<String> cmds = []
-    
-    // Bind temperature cluster (0x0402)
-    cmds += ["zdo bind ${device.deviceNetworkId} 0x01 0x01 0x0402 {${device.zigbeeId}} {}", "delay 50"]
-    
-    // Bind humidity cluster (0x0405)
-    cmds += ["zdo bind ${device.deviceNetworkId} 0x01 0x01 0x0405 {${device.zigbeeId}} {}", "delay 50"]
-    
-    // Bind  illuminance cluster (0x0400)
-    cmds += ["zdo bind ${device.deviceNetworkId} 0x01 0x01 0x0400 {${device.zigbeeId}} {}", "delay 50"]
-    
-    // Bind manufacturer cluster and configure presence atributes reporting
-    cmds += ["zdo bind ${device.deviceNetworkId} 0x01 0x01 0xFCC0 {${device.zigbeeId}} {}"]
+    cmds += zigbee.readAttribute(0xFCC0, 0x00EE, [mfgCode: 0x115F], delay=200)   // Read OTA data; makes the device expose more attributes related to OTA
+    cmds += zigbee.readAttribute(0xFCC0, 0x010C, [mfgCode: 0x115F], delay=200)   // Read motion sensitivity
+    cmds += zigbee.readAttribute(0xFCC0, 0x0142, [mfgCode: 0x115F], delay=200)   // Read current presence
+    cmds += zigbee.readAttribute(0xFCC0, 0x014D, [mfgCode: 0x115F], delay=200)   // Read current PIR detection
+    cmds += zigbee.readAttribute(0xFCC0, 0x014F, [mfgCode: 0x115F], delay=200)   // Read current PIR interval
+    cmds += zigbee.readAttribute(0xFCC0, 0x0197, [mfgCode: 0x115F], delay=200)   // Read current absence delay timer value
+    cmds += zigbee.readAttribute(0xFCC0, 0x019A, [mfgCode: 0x115F], delay=200)   // Read detection range
+    cmds += ["he raw 0x${device.deviceNetworkId} 0 0 0x8002 {40 00 00 00 00 40 8f 5f 11 52 52 00 41 2c 52 00 00} {0x0000}", "delay 200",]
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0xFCC0 {${device.zigbeeId}} {}"
     cmds += zigbee.configureReporting(0xFCC0, 0x0142, 0x20, 0, 300, 1, [mfgCode: 0x115F], delay=200)   // Configure presence (0x0142) reporting: min=0s, max=300s, change=1
     cmds += zigbee.configureReporting(0xFCC0, 0x014D, 0x20, 0, 300, 1, [mfgCode: 0x115F], delay=200)   // Configure PIR detection (0x014D) reporting: min=0s, max=300s, change=1
-    
-    // Call routine to send the Zigbee commands
+    logDebug "aqaraBlackMagic() for FP300"
     sendZigbeeCommands(cmds)
 }
 
