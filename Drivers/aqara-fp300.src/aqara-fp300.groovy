@@ -29,7 +29,7 @@
  */
 
 static String version()   { "1.2.0" }
-static String timeStamp() { "2026/06/06 2:05" }
+static String timeStamp() { "2026/06/06 2:11" }
 
 import hubitat.device.Protocol
 import groovy.transform.Field
@@ -97,7 +97,7 @@ metadata {
             // Custom Temperature reporting
             input name: "temperatureReportingMode", type: "enum", title: "<b>Temperature Reporting Mode</b>", description: "Temperature reporting type when in custom mode.", options: ["1": "Threshold only", "2": "Interval only", "3": "Threshold and Interval"], defaultValue: "1"
             input name: "temperatureReportingInterval", type: "number", title: "<b>Temperature Reporting Interval (s)</b>", description: "Custom time interval for temperature data reporting.", range: 600..3600, defaultValue: 600
-            input name: "temperatureReportingThreshold", type: "decimal", title: "<b>Temperature Reporting Threshold (°C)</b>", description: "Reporting will trigger as temperature change reaches this value when in custom mode.", range: 0.2..3.0, defaultValue: 1.0
+            input name: "temperatureReportingThreshold", type: "decimal", title: "<b>Temperature Reporting Threshold (°C)</b>", description: "Reporting will trigger as temperature change reaches this value when in custom mode.", range: 0..3, defaultValue: 1.0
 
             // Custom  Humidity reporting
             input name: "humidityReportingMode", type: "enum", title: "<b>Humidity Reporting Mode</b>", description: "Humidity reporting type when in custom mode.", options: ["1": "Threshold only", "2": "Interval only", "3": "Threshold and Interval"], defaultValue: "1"
