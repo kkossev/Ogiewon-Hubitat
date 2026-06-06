@@ -24,11 +24,12 @@
  *  1.0.10   2026-03-17    Dan Ogorchock    Added Firmware Version info thanks to @hubitrep!
  *  1.0.11   2026-03-17    Dan Ogorchock    Minor changes to refresh() to reduce the chance of overwhelming the FP300 sensor, clean up firmware version number reporting, fix dateCode no being updated reliably
  *  1.1.0    2026-04-23    Dan Ogorchock    Add new User Preference to alter the behavior of "BOTH" presence detection mode to mimic Aqara's implementation on their hubs when this setting is Enabled.
+ *  1.2.0    2026-06-06    kkossev          Aqara FP300 version 0.0.0_6542 fixes
  *
  */
 
-static String version()   { "1.1.0" }
-static String timeStamp() { "2026/04/23 18:40" }
+static String version()   { "1.2.0" }
+static String timeStamp() { "2026/06/06 11:18" }
 
 import hubitat.device.Protocol
 import groovy.transform.Field
@@ -257,7 +258,7 @@ private void parseAqaraClusterFCC0(String description, Map descMap, Map it) {
             logDebug "<b>Received FP300 unknown report</b> (cluster=0x${it.cluster} attrId=0x${it.attrId} value=0x${it.value})"
             break
         case "00F7":
-            decodeAqaraStruct(description)
+            decodeAqaraStruct(it.value) // ver. 1.2.0 bug fix
             break
         case "00FC":
             log.warn "LUMI LEAVE report received (cluster=FCC0 attrId=00FC value=${it.value})"
@@ -454,14 +455,14 @@ private void parseBatteryTLV(String valueHex) {
     }
 }
 
-void decodeAqaraStruct(String description) {
-    def valueHex = description.split(",").find { it.split(":")[0].trim() == "value" }?.split(":")[1]?.trim()
+void decodeAqaraStruct(String valueHex) {
     if (!valueHex) return
-    int MsgLength = valueHex.size()
-    for (int i = 2; i < (MsgLength - 3); ) {
+    int msgLength = valueHex.size()
+    
+    if (logEnable) log.debug "decodeAqaraStruct 00F7 : len = ${msgLength} valueHex = ${valueHex}"
+    for (int i = 0; i < msgLength - 3; ) {
+        int tag = Integer.parseInt(valueHex[(i+0)..(i+1)], 16)
         int dataType = Integer.parseInt(valueHex[(i+2)..(i+3)], 16)
-        int tag      = Integer.parseInt(valueHex[(i+0)..(i+1)], 16)
-        int rawValue = 0
         switch (dataType) {
             case 0x08: case 0x10: case 0x18: case 0x20: case 0x28: case 0x30:
                 rawValue = Integer.parseInt(valueHex[(i+4)..(i+5)], 16)
@@ -481,7 +482,7 @@ void decodeAqaraStruct(String description) {
                 i += 8; break
             case 0x42:  // String type – Aqara often encodes firmware version here
                 int strLen = Integer.parseInt(valueHex[(i+4)..(i+5)], 16)
-                if (i + 6 + strLen * 2 <= MsgLength) {
+                if (i + 6 + strLen * 2 <= msgLength) {
                     String strVal = new String(valueHex[(i+6)..(i+5+strLen*2)].decodeHex())
                     switch (tag) {
                         case 0x03: device.updateDataValue("aqaraFirmware", strVal); logDebug "Aqara firmware (tag 0x03): ${strVal}"; break
@@ -619,9 +620,14 @@ void sendBatteryEvent(int pct) {
 
 void parseZDOcommand(Map descMap) {
     switch (descMap.clusterId) {
+        case "0002": // Node Descriptor Request (Node_Desc_req)
+            logDebug "ZDO Node Descriptor request, data=${descMap.data} (Sequence Number:${descMap.data[0]})"
+            runIn(1, "sendTimeSync")  
+            break
         case "0013":
             logInfo "Device announcement received"
             fp300BlackMagic()
+            runIn(1, "sendTimeSync")  
             break
         case "8021":
             logDebug "Bind response: ${descMap.data[1] == '00' ? 'Success' : 'Failure'}"
@@ -629,6 +635,34 @@ void parseZDOcommand(Map descMap) {
         default:
             logDebug "ZDO: clusterId=${descMap.clusterId} data=${descMap.data}"
     }
+}
+
+void sendTimeSync() {
+    // No-arg wrapper so runIn() can call this. Sends Time cluster data proactively
+    // (Hubitat's coordinator never auto-responds to device-originated cluster 0x000A reads).
+    // Probably, without this reply the device's internal 24-hour watchdog timer causes it to leave the network?
+    final long ZIGBEE_EPOCH_OFFSET = 946684800L   // seconds between Unix epoch and ZigBee epoch (Jan 1 2000 UTC)
+    long zigbeeTime = (now() / 1000L).toLong() - ZIGBEE_EPOCH_OFFSET
+    int tzOffsetSec = location.timeZone.rawOffset.intdiv(1000)          // e.g. +10800 for UTC+3
+    int dstSec = location.timeZone.inDaylightTime(new Date()) ? location.timeZone.getDSTSavings().intdiv(1000) : 0
+
+    String tHex   = toLEHex32(zigbeeTime)
+    String tzHex  = toLEHex32(tzOffsetSec)
+    String dstHex = toLEHex32(dstSec)
+
+    // ZCL Read Attributes Response header: 0x18 = profile-wide | server-to-client | disable-default-response
+    // seq=00 (device doesn't require exact match), cmd=0x01 (Read Attributes Response)
+    // Attr 0x0000: type 0xE2 (UTCTime/uint32), Attr 0x0002: type 0x2B (INT32), Attr 0x0005: type 0x2B (INT32)
+    String payload = "18 00 01 00 00 00 E2 ${tHex} 02 00 00 2B ${tzHex} 05 00 00 2B ${dstHex}"
+    List<String> cmds = ["he raw 0x${device.deviceNetworkId} 1 1 0x000A {${payload}} {0x0104}"]
+    logDebug "Sending Time cluster reply: UTC=${zigbeeTime} (${new Date()}) TZ=${tzOffsetSec}s DST=${dstSec}s"
+    sendZigbeeCommands(cmds)
+}
+
+private String toLEHex32(long value) {
+    // 4-byte little-endian hex string, space-separated; handles signed negatives via 2's complement masking
+    long v = value & 0xFFFFFFFFL
+    return String.format("%02X %02X %02X %02X", (v & 0xFF), ((v >> 8) & 0xFF), ((v >> 16) & 0xFF), ((v >> 24) & 0xFF))
 }
 
 void parseZHAcommand(Map descMap) {
@@ -848,6 +882,7 @@ void configure() {
     initializeVars(false)
     runIn(DEFAULT_POLLING_INTERVAL, "deviceHealthCheck", [overwrite: true, misfire: "ignore"])
     runIn(5, "fp300BlackMagic")
+    runIn(10, "sendTimeSync")
     runIn(15, "updated")
     logWarn "configure() - If no further logs appear, make sure you have woken the FP300 by pressing the button on it."
 }
@@ -951,8 +986,10 @@ void fp300BlackMagic() {
     // Bind  illuminance cluster (0x0400)
     cmds += ["zdo bind ${device.deviceNetworkId} 0x01 0x01 0x0400 {${device.zigbeeId}} {}", "delay 50"]
     
-    // Bind manufacturer cluster and read initial values
+    // Bind manufacturer cluster and configure presence atributes reporting
     cmds += ["zdo bind ${device.deviceNetworkId} 0x01 0x01 0xFCC0 {${device.zigbeeId}} {}"]
+    cmds += zigbee.configureReporting(0xFCC0, 0x0142, 0x20, 0, 300, 1, [mfgCode: 0x115F], delay=200)   // Configure presence (0x0142) reporting: min=0s, max=300s, change=1
+    cmds += zigbee.configureReporting(0xFCC0, 0x014D, 0x20, 0, 300, 1, [mfgCode: 0x115F], delay=200)   // Configure PIR detection (0x014D) reporting: min=0s, max=300s, change=1
     
     // Call routine to send the Zigbee commands
     sendZigbeeCommands(cmds)
