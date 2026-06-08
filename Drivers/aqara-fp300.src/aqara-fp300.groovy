@@ -24,12 +24,12 @@
  *  1.0.10   2026-03-17    Dan Ogorchock    Added Firmware Version info thanks to @hubitrep!
  *  1.0.11   2026-03-17    Dan Ogorchock    Minor changes to refresh() to reduce the chance of overwhelming the FP300 sensor, clean up firmware version number reporting, fix dateCode no being updated reliably
  *  1.1.0    2026-04-23    Dan Ogorchock    Add new User Preference to alter the behavior of "BOTH" presence detection mode to mimic Aqara's implementation on their hubs when this setting is Enabled.
- *  1.2.0    2026-06-06    kkossev          Aqara FP300 version 0.0.0_6542 fixes
+ *  1.2.0    2026-06-08    kkossev          Aqara FP300 version 0.0.0_6542 fixes
  *
  */
 
 static String version()   { "1.2.0" }
-static String timeStamp() { "2026/06/06 2:11" }
+static String timeStamp() { "2026/06/08 21:18" }
 
 import hubitat.device.Protocol
 import groovy.transform.Field
@@ -98,6 +98,7 @@ metadata {
             input name: "temperatureReportingMode", type: "enum", title: "<b>Temperature Reporting Mode</b>", description: "Temperature reporting type when in custom mode.", options: ["1": "Threshold only", "2": "Interval only", "3": "Threshold and Interval"], defaultValue: "1"
             input name: "temperatureReportingInterval", type: "number", title: "<b>Temperature Reporting Interval (s)</b>", description: "Custom time interval for temperature data reporting.", range: 600..3600, defaultValue: 600
             input name: "temperatureReportingThreshold", type: "decimal", title: "<b>Temperature Reporting Threshold (°C)</b>", description: "Reporting will trigger as temperature change reaches this value when in custom mode.", range: 0..3, defaultValue: 1.0
+            if (temperatureReportingThreshold <0.2) { device.updateSetting("temperatureReportingThreshold", [value: 0.2, type: "decimal"]) }
 
             // Custom  Humidity reporting
             input name: "humidityReportingMode", type: "enum", title: "<b>Humidity Reporting Mode</b>", description: "Humidity reporting type when in custom mode.", options: ["1": "Threshold only", "2": "Interval only", "3": "Threshold and Interval"], defaultValue: "1"
@@ -623,7 +624,7 @@ void parseZDOcommand(Map descMap) {
         case "0002": // Node Descriptor Request (Node_Desc_req)
             logDebug "ZDO Node Descriptor request, data=${descMap.data} (Sequence Number:${descMap.data[0]})"
             runIn(1, "sendTimeSync")  
-            runIn(2, "aqaraBlackMagic")
+            runIn(2, "fp300BlackMagic")
             break
         case "0013":
             logInfo "Device announcement received"
