@@ -24,12 +24,12 @@
  *  1.0.10   2026-03-17    Dan Ogorchock    Added Firmware Version info thanks to @hubitrep!
  *  1.0.11   2026-03-17    Dan Ogorchock    Minor changes to refresh() to reduce the chance of overwhelming the FP300 sensor, clean up firmware version number reporting, fix dateCode no being updated reliably
  *  1.1.0    2026-04-23    Dan Ogorchock    Add new User Preference to alter the behavior of "BOTH" presence detection mode to mimic Aqara's implementation on their hubs when this setting is Enabled.
- *  1.2.0    2026-06-08    kkossev          Aqara FP300 version 0.0.0_6542 fixes
+ *  1.2.0    2026-06-09    kkossev          Aqara FP300 version 0.0.0_6542 fixes
  *
  */
 
 static String version()   { "1.2.0" }
-static String timeStamp() { "2026/06/08 21:18" }
+static String timeStamp() { "2026/06/09 12:59" }
 
 import hubitat.device.Protocol
 import groovy.transform.Field
@@ -988,6 +988,12 @@ void fp300BlackMagic() {
     cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0xFCC0 {${device.zigbeeId}} {}"
     cmds += zigbee.configureReporting(0xFCC0, 0x0142, 0x20, 0, 300, 1, [mfgCode: 0x115F], delay=200)   // Configure presence (0x0142) reporting: min=0s, max=300s, change=1
     cmds += zigbee.configureReporting(0xFCC0, 0x014D, 0x20, 0, 300, 1, [mfgCode: 0x115F], delay=200)   // Configure PIR detection (0x014D) reporting: min=0s, max=300s, change=1
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0402 {${device.zigbeeId}} {}"            // Bind Temperature cluster
+    cmds += zigbee.configureReporting(0x0402, 0x0000, 0x29, 30, 600, 10, [:], delay=200)               // Configure temperature (MeasuredValue) reporting: min=30s, max=600s, change=0.1°C
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0405 {${device.zigbeeId}} {}"            // Bind Humidity cluster
+    cmds += zigbee.configureReporting(0x0405, 0x0000, 0x21, 30, 600, 100, [:], delay=200)              // Configure humidity (MeasuredValue) reporting: min=30s, max=600s, change=1%
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0400 {${device.zigbeeId}} {}"            // Bind Illuminance cluster
+    cmds += zigbee.configureReporting(0x0400, 0x0000, 0x21, 30, 600, 50, [:], delay=200)               // Configure illuminance (MeasuredValue) reporting: min=30s, max=600s, change=50 (raw lux units)
     logDebug "aqaraBlackMagic() for FP300"
     sendZigbeeCommands(cmds)
 }
